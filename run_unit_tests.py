@@ -3,6 +3,11 @@
 from __future__ import print_function
 from scriptengine import *
 
+class TestCase:
+    def __init__(self, test_POU, prio = 100):
+        self.test_POU = test_POU
+        self.prio = prio
+
 class POU_Finder:
     @staticmethod
     def find_POU_by_name(project, POU_name):
@@ -23,28 +28,33 @@ class POU_Finder:
             plc_prg =  POU_Finder.find_POU_in_tree_by_name(child, POU_name)
             if not plc_prg is None:
                 return plc_prg
-                
+
     @staticmethod
-    def find_all_POUs_extending_from(project, POU_name):
+    def find_all_test_case_POUs(project):
         POUs = []
         for child in project.get_children():
-            POUs_to_append = POU_Finder.find_all_POUs_in_tree_extending_from(child, POU_name)
+            POUs_to_append = POU_Finder.find_all_test_case_POUs_in_tree(child)
             for to_append in POUs_to_append:
                 POUs.append(to_append)
         return POUs
 
     @staticmethod
-    def find_all_POUs_in_tree_extending_from(treeobj, POU_name):
+    def find_all_test_case_POUs_in_tree(treeobj):
         POUs = []
         
         if treeobj.has_textual_declaration:
             textual_declaration = treeobj.textual_declaration
             first_line = textual_declaration.get_line(0)
-            if first_line.find("EXTENDS {}".format(POU_name)) > 0:
-                POUs.append(treeobj)
+            if first_line.find("(*Test") >= 0 and first_line.find("ABSTRACT") == -1:
+                PRIO_pos = first_line.find("PRIO := ")
+                if PRIO_pos >= 0:
+                    prio = int(first_line[len("PRIO := ") + PRIO_pos])
+                    POUs.append(TestCase(treeobj, prio))
+                else:
+                    POUs.append(TestCase(treeobj))
         else:
             for child in treeobj.get_children(False):
-                POUs_to_append = POU_Finder.find_all_POUs_in_tree_extending_from(child, POU_name)
+                POUs_to_append = POU_Finder.find_all_test_case_POUs_in_tree(child)
                 for to_append in POUs_to_append:
                     POUs.append(to_append)
         
@@ -55,38 +65,20 @@ class CodesysTypeConverter:
     def to_int(codesys_int):
         return int(codesys_int.split("#")[1])
 
-# Define the printing function. This function starts with the
-# so called "docstring" which is the recommended way to document
-# functions in python.
-def print_tree(treeobj, depth=0):
-    """ Print a device and all its children
+class TestCaseSorter:
+    @staticmethod
+    def sort_by_prio(test_cases):
+        test_cases.sort(key = lambda test_case: test_case.prio)
 
-    Arguments:
-    treeobj -- the object to print
-    depth -- The current depth within the tree (default 0).
 
-    The argument 'depth' is used by recursive call and
-    should not be supplied by the user.
-    """
-
-    # if the current object is a device, we print the name and device identification.
-    if treeobj.has_textual_declaration:
-        textual_declaration = treeobj.textual_declaration
-        first_line = textual_declaration.get_line(0)
-        if first_line.find("EXTENDS TestCaseBase") > 0:
-            name = treeobj.get_name(False)
-            print("{0}- {1}".format("--"*depth, name))
-
-    # we recursively call the print_tree function for the child objects.
-    for child in treeobj.get_children(False):
-        print_tree(child, depth+1)
 
 plc_prg = POU_Finder.find_POU_by_name(projects.primary, "PLC_PRG")
-test_cases = POU_Finder.find_all_POUs_extending_from(projects.primary, "TestCaseBase")
+test_cases = POU_Finder.find_all_test_case_POUs(projects.primary)
 if len(test_cases) == 0:
     raise Exception("No test cases found.")
 
 test_cases.reverse()
+TestCaseSorter.sort_by_prio(test_cases)
 
 plc_prg.textual_declaration.replace(
 """PROGRAM PLC_PRG
@@ -102,11 +94,14 @@ VAR
     ];
 END_VAR
 """.format( len(test_cases), 
-            "\n\t".join("test_{0} : {1} := (test_case_name := '{1}');".format(index, test_case.get_name(False)) for index, test_case in enumerate(test_cases)), 
+            "\n\t".join("test_{0} : {1} := (test_case_name := '{1}');".format(index, test_case.test_POU.get_name(False)) for index, test_case in enumerate(test_cases)), 
             ",\n\t\t".join("test_{0}".format(index) for index, test_case in enumerate(test_cases))))
+
+projects.primary.save()
 
 application = projects.primary.active_application
 application.build()
+
 
 online_application = online.create_online_application(application)
 
@@ -118,6 +113,7 @@ online_application.login(OnlineChangeOption.Never, True)
 
 #while online_application.application_state != ApplicationState.stop:
 #    wait = True
+
 
 # start PLC if necessary
 if online_application.application_state != ApplicationState.run:
