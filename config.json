@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "Running unit tests",
+    "Desc": "Processing1",
+    "Icon": "CoDeSys.ico",
+    "Path": "TestFramework/run_unit_tests.py"
+  },
+  
+  {
+    "Name": "Import excel database",
+    "Desc": "Processing1",
+    "Icon": "CoDeSys.ico",
+    "Path": "TestFramework/import_excel_database.py"
+  }
+]
