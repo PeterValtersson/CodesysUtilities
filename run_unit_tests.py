@@ -51,7 +51,7 @@ class POU_Finder:
                     prio = int(first_line[len("PRIO := ") + PRIO_pos])
                     POUs.append(TestCase(treeobj, prio))
                 else:
-                    POUs.append(TestCase(treeobj))
+                    POUs.append(TestCase(treeobj, 0))
         else:
             for child in treeobj.get_children(False):
                 POUs_to_append = POU_Finder.find_all_test_case_POUs_in_tree(child)
@@ -68,7 +68,7 @@ class CodesysTypeConverter:
 class TestCaseSorter:
     @staticmethod
     def sort_by_prio(test_cases):
-        test_cases.sort(key = lambda test_case: test_case.prio)
+        test_cases.sort(key = lambda test_case: test_case.prio, reverse = True)
 
 
 
@@ -77,9 +77,9 @@ test_cases = POU_Finder.find_all_test_case_POUs(projects.primary)
 if len(test_cases) == 0:
     raise Exception("No test cases found.")
 
-test_cases.reverse()
+#test_cases.reverse()
 TestCaseSorter.sort_by_prio(test_cases)
-
+print(test_cases)
 plc_prg.textual_declaration.replace(
 """PROGRAM PLC_PRG
 VAR CONSTANT
@@ -100,7 +100,7 @@ END_VAR
 projects.primary.save()
 
 application = projects.primary.active_application
-application.build()
+#application.build()
 
 
 online_application = online.create_online_application(application)
