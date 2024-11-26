@@ -1,64 +1,77 @@
+#!/usr/local/bin/python
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 from scriptengine import *
 
 
 #from System.Runtime.InteropServices import Marshal
 #Excel = Marshal.GetActiveObject("Excel.Application")
-database = system.ui.open_file_dialog(title = "Choose Excel database to import", filter = "Excel files (*.xlsl)|*.xlsx")
 
+
+database = system.ui.open_file_dialog(title = "Choose Excel database to import", filter = "Excel files (*.xlsl)|*.xlsx", directory = "C:\Users\tmgpeva\OneDrive - Epiroc\Dokument\non vault repos\CodesysUtilities")
+import_type = system.ui.choose(message = "What to import", options = ["Import database info into database library", "Import database info into database library, no textlists", "Import inputs and outputs for project"])[0]
 print("Opening {}".format(database))
-
 class Worksheet:
     def __init__(self, backend):
         self.backend = backend
         dig = self.backend
         ids = dig.Columns("D")
-        print(ids.Cells(1,1).Value())
-        print(ids.Cells(2,1).Value())
-        print(ids.Cells(3,1).Value())
+        #print(ids.Cells(1,1).Value())
+        #print(ids.Cells(2,1).Value())
+        #print(ids.Cells(3,1).Value())
        
 
     def get_column_values(self, column):
         return self._filter_out_cells_with_no_values(self.backend.Columns(column).Cells())
 
     def get_column_values_limited(self, column, max_count):
-        values = [c for c in self.backend.Columns(column).Cells()]
-        if len(values) > max_count:
-            return list(values[0:max_count])
-        else:
-            return values
-
+        #print(column)
+        #print("Cell {}".format(self.backend.Columns(column).Cells(1,1).Text))
+        cells = self.backend.Columns(column)#.Cells()
+        cells_with_values = []
+        for i in range(0, max_count-1):
+            cells_with_values.append(cells.Cells(i+2,1).Text)
+        return cells_with_values
+    
     def count_column_values(self, column):
         dig = self.backend
         ids = dig.Columns("D")
-        print(ids.Cells(1,1).Value())
-        print(ids.Cells(2,1).Value())
-        print(ids.Cells(3,1).Value())
-
-        values = self._filter_out_cells_with_no_values(self.backend.Columns(column).Cells())
+        #print(ids.Cells(1,1).Value())
+        #print(ids.Cells(2,1).Value())
+        #print(ids.Cells(3,1).Value())
+        #print(column)
+        #print("Cell {}".format(self.backend.Columns(column).Cells(2,1).Text))
+        #print("Cell {}".format(self.backend.Columns(column).Cells(3,1).Text))
+        values = self._filter_out_row_cells_with_no_values(self.backend.Columns(column).Cells())
         return len(values)
 
     def get_row_values(self, row):
         dig = self.backend
-        ids = dig.Columns("D")
-        print(ids.Cells(1,1).Value())
-        print(ids.Cells(2,1).Value())
-        print(ids.Cells(3,1).Value())
-
-        dig = self.backend
         ids = dig.Columns(row)
-        print(ids.Cells(1,1).Value())
-        print(ids.Cells(2,1).Value())
-        print(ids.Cells(3,1).Value())
-        return self._filter_out_cells_with_no_values(self.backend.Rows(row).Cells())
+        #print(ids.Cells(1,1).Value())
+        #print(ids.Cells(2,1).Value())
+        #print(ids.Cells(3,1).Value())
         
-    def _filter_out_cells_with_no_values(self, cells):
+        return self._filter_out_row_cells_with_no_values(self.backend.Rows(row).Cells())
+
+    def _filter_out_row_cells_with_no_values(self, cells):
         cells_with_values = []
         for cell in cells:
             if cell is None or cell == "":
                 break
             cells_with_values.append(cell)
-        
+        return cells_with_values
+    
+    def _filter_out_cells_with_no_values(self, cells):
+        cells_with_values = []
+        i = 2
+        while True:
+            if cells.Cells(i, 0).Value is None or cells.Cells(i, 0).Text == "":
+                break
+            cells_with_values.append(cells.Cells(i, 0).Text)
+            #print("Cell {}".format(cells.Cells(i, 0).Text))
+            i+=1
+       
         return cells_with_values
 
     def get_name(self):
@@ -68,6 +81,12 @@ class Workbook:
     def __init__(self, backend):
         self.backend = backend
 
+    def get_worksheets(self):
+        worksheets = []
+        for worksheet in self.backend.Sheets:
+            worksheets.append(Worksheet(worksheet))
+        return worksheets
+    
     def get_worksheet_by_name(self, name):
         try:
             return self._get_worksheet_by_name(name)
@@ -84,13 +103,23 @@ class Excel:
         import Microsoft.Office.Interop.Excel as Excel    
         self.excel = Excel.ApplicationClass()
         self.excel.Visible = False
+        self.excel.Interactive = False
+        self.excel.DisplayAlerts = False
         self.workbooks = []
 
-    def __del__(self):
-        for wb in self.workbooks:
-            wb.backend.Close()
-        self.excel.Quit()
+    def __enter__(self):
+        return self
 
+    def __exit__(self, *args):
+        print("Closing workbooks")
+        for wb in self.workbooks:
+            print("Closing...")
+            wb.backend.Close(False)
+            del(wb.backend)
+        print("Closing excel")
+        self.excel.Quit()
+        del(self.excel)
+        
     def open(self, path):
         try:
            return self._open(path)
@@ -98,7 +127,7 @@ class Excel:
             raise Exception("Could not open workbook: {}".format(path))
 
     def _open(self, path):
-        workbook = Workbook(self.excel.Workbooks.Open(path))
+        workbook = Workbook(self.excel.Workbooks.Open(path, None, True))
         self.workbooks.append(workbook)
         return workbook
         
@@ -153,11 +182,57 @@ class Parameter(DatabaseEntryData):
             self.num_dec, 
             self.unit)
 
+class WorksheetExtractor:
+    @staticmethod
+    def extract(worksheet, num_entries):
+        print("Extracting worksheet", worksheet.get_name())
+        top_row = worksheet.get_row_values(1)
+        #print(top_row)
 
+        fields = {}
+
+        def _find_data_name_index(data_name):
+            try:
+                return top_row.index(data_name)
+            except:
+                raise Exception("Could not find {} in {}".format(data_name, worksheet.get_name()))
+
+        def _get_data_array(data_name):
+            data_index = _find_data_name_index(data_name)
+            return worksheet.get_column_values_limited(data_index+1, num_entries)
+    
+
+        for field in top_row:
+            fields[field] = _get_data_array(field)
+            #print(fields[field])
+        return fields
+    
+class WorkbookExtractor:
+    @staticmethod
+    def extract(workbook, exclude_list = []):
+        class Entries(object): pass
+        entries = {}
+        worksheets = workbook.get_worksheets()
+        print("Found {} worksheets".format(len(worksheets)))
+        for ws in worksheets:
+            print(ws.get_name())
+        
+        for worksheet in worksheets:
+            if worksheet.get_name() in exclude_list:
+                continue
+            columns = worksheet.get_row_values(1)
+            index_column = columns.index("database ID") + 1
+            entries_count = worksheet.count_column_values(index_column)
+            print("Num entries in sheet: {}".format(entries_count))
+            entries[worksheet.get_name()] = WorksheetExtractor.extract(worksheet, entries_count)
+            #print(entries[worksheet.get_name()]["database ID"])
+        #entries.digital_outputs = DigitalOutputExtractor(workbook.get_worksheet_by_name("OutputsDig")).extract_all_digial_outputs()
+        return entries
+    
 class DatabaseEntryExtractorBase:
     def __init__(self, worksheet):
         self.worksheet = worksheet
-        print("Get", worksheet.get_name())
+        print("Extracting worksheet", worksheet.get_name())
         self.top_row = worksheet.get_row_values(1)
         print(self.top_row)
         self.number_of_entries_on_sheet = self.worksheet.count_column_values(self._find_data_name_index("name") + 1)
@@ -237,8 +312,12 @@ class DatabaseExtractor:
     def extract(workbook):
         class Entries(object): pass
         entries = Entries()
+        entries.worksheets = workbook.get_worksheets()
+        print("Found {} worksheets".format(len(entries.worksheets)))
+        for ws in entries.worksheets:
+            print(ws.get_name())
         entries.parameters = ParameterExtractor(workbook.get_worksheet_by_name("Parameters")).extract_all_parameters()
-        entries.digital_outputs = DigitalOutputExtractor(workbook.get_worksheet_by_name("OutputsDig")).extract_all_digial_outputs()
+        #entries.digital_outputs = DigitalOutputExtractor(workbook.get_worksheet_by_name("OutputsDig")).extract_all_digial_outputs()
         return entries
 
 class DatabaseNameFormater:
@@ -246,21 +325,37 @@ class DatabaseNameFormater:
     def format(name):
         return name.replace(" ", "_")
 
+class CommentFormater:
+    @staticmethod
+    def format(type, sheet, entry):
+        to_add = []
+        if type is not None:
+            to_add.append(("", type))
+        if "Comment" in sheet:
+            to_add.append(("", sheet["Comment"][entry]))
+        for c in ["value", "channel", "pin", "location", "num_dec", "max_value", "min_value", "unit", "max_actual", "min_actual", "unit_actual", "KP", "KI", "frequency", "dither_freq", "dither_value", "byte 3", "byte 2", "byte 1", "byte 0"]:
+            if c in sheet:
+                to_add.append(("{}:".format(c), sheet[c][entry]))
+        
+        return ", ".join(["{} {}".format(t, v) for t, v in to_add])
+    
 class DatabaseIDFormater:
     @staticmethod
-    def format(to_format):
-        return DatabaseIDFormater._format(to_format)
+    def format_all(sheets):
+        return "\n".join("\n\n// {} declarations\n{}".format(k, 
+                                                             DatabaseIDFormater.format(k, v, i+1 == len(sheets))
+                                                             ) for i, (k, v) in enumerate(sheets.items()))
 
     @staticmethod
-    def _format(to_format):
+    def format(type, to_format, last):
         return "\n".join(
             "{} := SHL(TO_DWORD(DatabaseType.{}), 16) OR {}{}\t//{}".format(
-                DatabaseNameFormater.format(s.name),
-                s.type,
-                s.id,
-                "" if i+1 == len(to_format) else ",",
-                s.comment
-            ) for i, s in enumerate(to_format))
+                DatabaseNameFormater.format(s),
+                type,
+                i,
+                "" if last and i+1 == len(to_format["database ID"]) else ",",
+                CommentFormater.format(type, to_format, i)
+            ) for i, s in enumerate(to_format["database ID"]))
 
 
 class InitDatabaseFormater:
@@ -275,33 +370,381 @@ class ParametersPOUFormater:
     def format_declaration(to_format):
         return "\n".join(
             "{}_{}_{} : {}; \t//{}".format(
-                DatabaseNameFormater.format(s.name),
-                s.unit,
-                s.num_dec,
-                "BOOL" if s.max_value == 1 else "UINT",
-                s.comment
-            ) for i, s in enumerate(to_format))
+                DatabaseNameFormater.format(s),
+                to_format["unit"][i],
+                to_format["num_dec"][i],
+                "BOOL" if to_format["max_value"][i] == "1" else "INT",
+                CommentFormater.format(None, to_format, i)
+            ) for i, s in enumerate(to_format["database ID"]))
 
     @staticmethod
     def format_definition(to_format):
         return "\n".join(
-            "\t{}_{}_{} := ParameterGet{}(DatabaseID.{});".format(
-                DatabaseNameFormater.format(s.name),
-                s.unit,
-                s.num_dec,
-                "BOOL" if s.max_value == 1 else "UINT",
-                DatabaseNameFormater.format(s.name)
-            ) for i, s in enumerate(to_format))
+            "\t{}_{}_{} := Database.get_parameter_as_{}(DatabaseID.{});".format(
+                DatabaseNameFormater.format(s),
+                to_format["unit"][i],
+                to_format["num_dec"][i],
+                "BOOL" if to_format["max_value"][i] == "1" else "INT",
+                DatabaseNameFormater.format(s)
+            ) for i, s in enumerate(to_format["database ID"]))
+    
 
-try:
-    excel = Excel()
-    wb = excel.open(database)
-    ws = wb.get_worksheet_by_name("Parameters")
-    entries = DatabaseExtractor.extract(wb)
-    print(DatabaseIDFormater.format(entries.parameters))
-    print(DatabaseIDFormater.format(entries.digital_outputs))
-    print(InitDatabaseFormater.format(entries.parameters))
-    print(ParametersPOUFormater.format_declaration(entries.parameters))
-    print(ParametersPOUFormater.format_definition(entries.parameters))
-except:
-    raise
+class InitDatabaseFormater:
+    @staticmethod
+    def format_all(sheets, black_list = ["General"]):
+        new_list = {}
+        for i, (k, v) in enumerate(sheets.items()):
+            if not k in black_list:
+                new_list[k] = v
+        return "\n".join("\n\n// Initiating {} database\n{}".format(k, 
+                                                            InitDatabaseFormater.format(k, v)
+                                                             ) for i, (k, v) in enumerate(new_list.items()))
+
+    @staticmethod
+    def format(type, to_format):
+        return "\n".join(
+            "init_{}(DatabaseID.{}, {});".format(
+                InitDatabaseFormater.pick_method(type),
+                DatabaseNameFormater.format(s),
+                InitDatabaseFormater.format_init_data(to_format, i)) if not InitDatabaseFormater.should_exclude(to_format, i) else ""
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def pick_method(type):
+        if type == "Parameter": return "parameter"
+        if type == "AnalogueInput": return "analog"
+        if type == "PhysicalDigitalInput": return "digital_input"
+        if type == "PhysicalDigitalOutput": return "digital_output"
+        if type == "PWMOutput": return "PWM_output"
+        return ""
+    
+    @staticmethod
+    def should_exclude(to_format, entry):
+        if "Excluded" in to_format and (to_format["Excluded"][entry] == "X" or to_format["Excluded"][entry] == "x"):
+            return True
+        if "unit_actual" in to_format and to_format["unit_actual"][entry] == "pulse2":
+            return True
+        return False
+    
+    @staticmethod
+    def format_init_data(to_format, entry, white_list = ["value", "channel", "pin", "location", "num_dec", "max_value", "min_value", "unit", "max_actual", "min_actual", "unit_actual", "KP", "KI", "frequency", "dither_freq", "dither_value"]):
+        new_list = {}
+        new_list = {}
+        for i, (k, v) in enumerate(to_format.items()):
+            if k in white_list:
+                new_list[k] = v
+        return ", ".join(["{} := {}".format(k, 
+                                     InitDatabaseFormater.format_init_value(k, v, entry)
+        ) for i, (k, v) in enumerate(new_list.items())])
+
+    @staticmethod
+    def format_init_value(type, to_format, entry):
+        if type == "unit" or type == "unit_actual": return "epirocTypes.Units.{}".format(to_format[entry])
+        if type == "location": return "epirocTypes.Location.{}".format(to_format[entry])
+        return to_format[entry]
+    
+global languages
+languages = ["Japanese", "Chinese", "Deutsch", "Español", "Français", "Svenska", "Russian", "Italiano", "Norsk", "Polski", "Português", "Suomi"]
+class TextlistFormater:
+    @staticmethod
+    def format_DatabaseID(sheets):
+        return [TextlistFormater.format(k, v) for i, (k, v) in enumerate(sheets.items())]
+
+    @staticmethod
+    def format(type, to_format):
+        return [(TextlistFormater.format_textid(type, i), s, TextlistFormater.format_translations(to_format, i))
+            for i, s in enumerate(to_format["database ID"])]
+    
+    @staticmethod
+    def format_textid(type, entry):
+        types = ["PhysicalDigitalInput", "PhysicalDigitalOutput", "AnalogueInput", "PWMOutput", "Parameter", "General"]
+        #return str("{} << 16 {}".format(types.index(type), entry))
+        return str((types.index(type) << 16) + entry)
+    
+    @staticmethod
+    def format_translations(to_format, entry):
+        translations = []
+        for lan in languages:
+            if lan in to_format:
+                translations.append((lan, to_format[lan][entry]))
+        return translations
+    
+    @staticmethod
+    def format_comment(type, to_format):
+        return [(TextlistFormater.format_textid(type, i), s, TextlistFormater.format_translations(to_format, i))
+            for i, s in enumerate(to_format["Comment"])]
+    
+
+class IOFormater:
+    @staticmethod
+    def format_analog_input_outputs(to_format):
+        return "\n".join(
+            "{}_{} : {}; //  {} from database".format(
+                DatabaseNameFormater.format(s),
+                IOFormater.format_analog_unit_dec(to_format, i),
+                "AnalogueInputValue",
+                "Analog input")
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def format_analog_unit_dec(to_format, entry):
+        return "{}_{}".format(to_format["unit"][entry], to_format["num_dec"][entry])
+    
+    @staticmethod
+    def format_analog_input_var(to_format):
+        return "\n".join(
+            "{0}_: epirocIOs.AnalogInput(DatabaseID.{0}, {0}_{1}, IO_reader){2};".format(
+                DatabaseNameFormater.format(s),
+                IOFormater.format_analog_unit_dec(to_format, i),
+                IOFormater.format_analog_input_var_assignment(to_format, i))
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def format_analog_input_var_assignment(to_format, entry):
+        assignments = []
+        if to_format["unit_actual"][entry] == "pulse":
+            assignments.append(
+                "retain_value := PersistentVars.{0}_retain, calibrate := InputVariables.{0}_calibrate, calibrate_value := InputVariables.{0}_calibrate_value".format(
+                    DatabaseNameFormater.format(to_format["database ID"][entry])))
+        if to_format["RigOptions"][entry] != "":
+            options = to_format["RigOptions"][entry].split()
+            assignments.append("rig_options := {}".format(" OR ".join("epirocConf.RigOptions.{}".format(o) for o in options)))
+        if len(assignments) > 0:
+            return " := ({})".format(", ".join(a for a in assignments))
+
+        return ""
+    
+    @staticmethod
+    def format_digital_input_outputs(to_format):
+        return "\n".join(
+            "{} : {}; //  {} from database".format(
+                DatabaseNameFormater.format(s),
+                "epirocUtil.BinaryStateBase",
+                "Digital input")
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def format_digital_input_var(to_format):
+        return "\n".join(
+            "{0}_: DigitalInputBinaryState(DatabaseID.{0}, {0}.state, IO_reader) := (state := {0});".format(
+                DatabaseNameFormater.format(s))
+            for i, s in enumerate(to_format["database ID"]))
+	
+    
+    @staticmethod
+    def format_digital_output_outputs(to_format):
+        return "\n".join(
+            "{} : {}; //  {} from database".format(
+                DatabaseNameFormater.format(s),
+                "BOOL",
+                "Digital output")
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def format_digital_output_var(to_format):
+        return "\n".join(
+            "{0}_: epirocIOs.DigitalOutput(DatabaseID.{0}, {0}, IO_reader);".format(
+                DatabaseNameFormater.format(s))
+            for i, s in enumerate(to_format["database ID"]))
+    
+def import_to_library(entries, import_textlists):
+    
+    database_ID_enum_text = projects.primary.find("DatabaseID", True)
+    if len(database_ID_enum_text) == 0:
+        raise Exception("DatabaseID enum not found")
+    database_ID_text = None
+    if database_ID_enum_text[0].is_textlist:
+        if len(database_ID_enum_text) == 1:
+            raise Exception("DatabaseID enum not found")
+        database_ID_enum = database_ID_enum_text[1]
+        database_ID_text = database_ID_enum_text[0]
+    else:
+        if len(database_ID_enum_text) > 1:
+            database_ID_text = database_ID_enum_text[1]
+        database_ID_enum = database_ID_enum_text[0]
+        
+    # Import DatabaseID enum
+    database_ID_enum.textual_declaration.replace("""{}
+    TYPE DatabaseID :
+    (
+    {}
+    ) DWORD;
+    END_TYPE
+
+            """.format("{attribute 'qualified_only'}", DatabaseIDFormater.format_all(entries)))
+
+    # Import Parameters FB
+    paramPOU = POU_Finder.find_POU_by_name(projects.primary, "Parameters")
+    if paramPOU is None:
+        raise Exception("Parameters POU not found")
+    paramPOU.textual_declaration.replace("""PROGRAM Parameters
+    VAR_INPUT
+        UPDATE : BOOL;
+    END_VAR
+    VAR_OUTPUT
+    {}
+    END_VAR
+            """.format(ParametersPOUFormater.format_declaration(entries["Parameter"])))
+
+    paramPOU.textual_implementation.replace("""IF UPDATE THEN
+    {}
+    END_IF
+            """.format(ParametersPOUFormater.format_definition(entries["Parameter"])))
+
+    # Import init_database
+    init_database = projects.primary.find("init_database", True)
+    if len(init_database) == 0:
+        raise Exception("init_database method not found")
+    init_database = init_database[0]
+
+    
+    init_database.textual_implementation.replace(
+    """reset_general_values();
+    
+    {}
+    """.format(InitDatabaseFormater.format_all(entries)))	
+    
+    if not import_textlists:
+        return
+    # Look for DatabaseID textlist and delete it and recreate it
+    if not database_ID_text is None:
+        database_ID_text.remove()
+
+    tlfolder = projects.primary.find("Textlists", True)
+    if len(tlfolder) == 0:
+        projects.primary.create_folder("Textlists")
+        tlfolder = projects.primary.find("Textlists", True)[0]
+    else:
+        tlfolder = tlfolder[0]
+    
+    projects.primary.create_textlist("DatabaseID")
+    database_ID_enum_text = projects.primary.find("DatabaseID", True)
+
+    if len(database_ID_enum_text) == 0:
+        raise Exception("DatabaseID enum not found")
+    database_ID_text = None
+    if database_ID_enum_text[0].is_textlist:
+        if len(database_ID_enum_text) == 1:
+            raise Exception("DatabaseID enum not found")
+        database_ID_enum = database_ID_enum_text[1]
+        database_ID_text = database_ID_enum_text[0]
+    else:
+        if len(database_ID_enum_text) < 2:
+            raise Exception("DatabaseID textlist not found")
+        database_ID_enum = database_ID_enum_text[0]
+        database_ID_text = database_ID_enum_text[1]
+
+    database_ID_text.move(tlfolder, -1)
+    for e in TextlistFormater.format_DatabaseID(entries):
+        for (i, id, translations) in e:
+            database_ID_text.rows.add(i, id)
+            for (lan, tran) in translations:
+                database_ID_text.addlanguage(lan)
+                database_ID_text.rows[i].setlanguagetext(lan, tran)
+
+    
+    def import_comment(textlist, type):
+        comment_textlist = projects.primary.find(textlist, True)
+        if len(comment_textlist) == 1:
+            comment_textlist[0].remove()
+        projects.primary.create_textlist(textlist)
+        comment_textlist = projects.primary.find(textlist, True)[0]
+        comment_textlist.move(tlfolder, -1)
+        for (i, id, translations) in TextlistFormater.format_comment(type, entries[type]):
+            comment_textlist.rows.add(i, id)
+            for (lan, tran) in translations:
+                comment_textlist.addlanguage(lan)
+                comment_textlist.rows[i].setlanguagetext(lan, tran)
+    # Import ParameterDescription            
+    import_comment("ParameterDescriptions", "Parameter")
+    # Import ParameterDescription            
+    import_comment("DatabaseGeneralDescriptions", "General")
+
+def import_to_master(entries):
+    analog_input = projects.primary.find("InputsAnalog", True)
+    if len(analog_input) == 0:
+        raise Exception("InputsAnalog FB not found")
+    analog_input = analog_input[0]
+
+    
+    analog_input.textual_declaration.replace(
+        """FUNCTION_BLOCK AnalogueInput EXTENDS epirocIOS.IOBaseBlock
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+{}
+END_VAR
+VAR
+{}
+END_VAR
+        """.format(IOFormater.format_analog_input_outputs(entries["AnalogueInput"]),    
+                   IOFormater.format_analog_input_var(entries["AnalogueInput"])))
+
+
+        
+
+    digital_input = projects.primary.find("InputsDigital", True)
+    if len(digital_input) == 0:
+        raise Exception("InputsDigital FB not found")
+    digital_input = digital_input[0]
+
+    
+    digital_input.textual_declaration.replace(
+        """FUNCTION_BLOCK InputsDigital EXTENDS epirocIOS.IOBaseBlock
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+{}
+END_VAR
+VAR
+{}
+END_VAR
+        """.format(IOFormater.format_digital_input_outputs(entries["PhysicalDigitalInput"]),    
+                   IOFormater.format_digital_input_var(entries["PhysicalDigitalInput"])))
+
+
+    digital_output = projects.primary.find("OutputsDigital", True)
+    if len(digital_output) == 0:
+        raise Exception("OutputsDigital FB not found")
+    digital_output = digital_output[0]
+
+    
+    digital_output.textual_declaration.replace(
+        """FUNCTION_BLOCK OutputsDigital EXTENDS epirocIOS.IOBaseBlock
+VAR_INPUT
+{}
+END_VAR
+VAR
+{}
+END_VAR
+        """.format(IOFormater.format_digital_output_outputs(entries["PhysicalDigitalOutput"]),    
+                   IOFormater.format_digital_output_var(entries["PhysicalDigitalOutput"])))
+
+
+from codesysutil import *
+def run():
+    try:
+        if import_type < 0:
+            return
+        with Excel() as excel:
+            wb = excel.open(database)
+            #ws = wb.get_worksheet_by_name("Parameters")
+            entries = WorkbookExtractor.extract(wb, exclude_list=["Metadata", "IDs", "RigErrors"])
+            for i, (k, v) in enumerate(entries.items()):
+                print("{}, Entries: {}, {}".format(k, len(v), len(v["database ID"])))
+                #for e in v["database ID"]:
+                # print(e)
+
+            #database_ID_enum = POU_Finder.find_POU_by_name(projects.primary, "DatabaseID")
+            if import_type == 0:
+                import_to_library(entries, True)
+            elif import_type == 1:
+                import_to_library(entries, False)
+            elif import_type == 2:
+                import_to_master(entries)
+
+            
+            print("--- Script finished. ---")
+    except:
+        raise
+run()
