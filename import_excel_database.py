@@ -9,7 +9,12 @@ from scriptengine import *
 
 
 database = system.ui.open_file_dialog(title = "Choose Excel database to import", filter = "Excel files (*.xlsl)|*.xlsx", directory = "C:\Users\tmgpeva\OneDrive - Epiroc\Dokument\non vault repos\CodesysUtilities")
-import_type = system.ui.choose(message = "What to import", options = ["Import database info into database library", "Import database info into database library, no textlists", "Import inputs and outputs for project"])[0]
+import_type = system.ui.choose(message = "What to import", options = ["Import to database library", "Import to database library - no textlists","Import FlexiROC interim database lib", "Import inputs and outputs for project"])[0]
+IMPORT_LIB = 0
+IMPORT_LIB_NO_TEXTLIST = 1
+IMPORT_LIB_FLEXI_INTERIM = 2
+IMPORT_PROJECT_INPUTS_OUTPUTS = 3
+
 print("Opening {}".format(database))
 class Worksheet:
     def __init__(self, backend):
@@ -373,7 +378,7 @@ class ParametersPOUFormater:
                 DatabaseNameFormater.format(s),
                 to_format["unit"][i],
                 to_format["num_dec"][i],
-                "BOOL" if to_format["max_value"][i] == "1" else "INT",
+                ParametersPOUFormater.is_BOOLean(to_format, i),
                 CommentFormater.format(None, to_format, i)
             ) for i, s in enumerate(to_format["database ID"]))
 
@@ -384,11 +389,17 @@ class ParametersPOUFormater:
                 DatabaseNameFormater.format(s),
                 to_format["unit"][i],
                 to_format["num_dec"][i],
-                "BOOL" if to_format["max_value"][i] == "1" else "INT",
+                ParametersPOUFormater.is_BOOLean(to_format, i),
                 DatabaseNameFormater.format(s)
             ) for i, s in enumerate(to_format["database ID"]))
+    @staticmethod
+    def is_BOOLean(to_format, i):
+        check = to_format["max_value"][i] + to_format["unit"][i] + to_format["num_dec"][i]
+        if check == "1NA0": return "BOOL"
+        return "INT"
     
-
+global scale_values
+scale_values = ["max_value", "min_value", "value"]
 class InitDatabaseFormater:
     @staticmethod
     def format_all(sheets, black_list = ["General"]):
@@ -403,7 +414,7 @@ class InitDatabaseFormater:
     @staticmethod
     def format(type, to_format):
         return "\n".join(
-            "init_{}(DatabaseID.{}, {});".format(
+            "init_{}(database_ID := DatabaseID.{},\t\t{});".format(
                 InitDatabaseFormater.pick_method(type),
                 DatabaseNameFormater.format(s),
                 InitDatabaseFormater.format_init_data(to_format, i)) if not InitDatabaseFormater.should_exclude(to_format, i) else ""
@@ -433,14 +444,18 @@ class InitDatabaseFormater:
         for i, (k, v) in enumerate(to_format.items()):
             if k in white_list:
                 new_list[k] = v
-        return ", ".join(["{} := {}".format(k, 
-                                     InitDatabaseFormater.format_init_value(k, v, entry)
+        return ",\t".join(["{} := {}".format(k, 
+                                     InitDatabaseFormater.format_init_value(to_format, k, v, entry)
         ) for i, (k, v) in enumerate(new_list.items())])
 
     @staticmethod
-    def format_init_value(type, to_format, entry):
+    def format_init_value(sheet, type, to_format, entry):
         if type == "unit" or type == "unit_actual": return "epirocTypes.Units.{}".format(to_format[entry])
-        if type == "location": return "epirocTypes.Location.{}".format(to_format[entry])
+        if type == "location": return "epirocTypes.Location.{}".format(to_format[entry])   
+        if "num_dec" in sheet and type in scale_values:
+            num_dec = int(sheet["num_dec"][entry])
+            to_scale = float(to_format[entry])
+            return str(int(to_scale * (10**num_dec)))
         return to_format[entry]
     
 global languages
@@ -493,22 +508,61 @@ class IOFormater:
     @staticmethod
     def format_analog_input_var(to_format):
         return "\n".join(
-            "{0}_: epirocIOs.AnalogInput(DatabaseID.{0}, {0}_{1}, IO_reader){2};".format(
+            "{0}_: epirocIOs.{1}(epirocDBD.DatabaseID.{0}, {0}_{2}, IO_reader){3};".format(
                 DatabaseNameFormater.format(s),
+                IOFormater.select_analog_input_type(to_format["unit_actual"][i]),
                 IOFormater.format_analog_unit_dec(to_format, i),
                 IOFormater.format_analog_input_var_assignment(to_format, i))
             for i, s in enumerate(to_format["database ID"]))
     
     @staticmethod
+    def select_analog_input_type(type):
+        if type == "pulse": return "EncoderInput"
+        if type == "pulse3": return "FastcountInput"
+        return "AnalogInput"
+    
+    @staticmethod
     def format_analog_input_var_assignment(to_format, entry):
         assignments = []
-        if to_format["unit_actual"][entry] == "pulse":
+        if "Absolute" in to_format and to_format["Absolute"][entry] != "":
+            assignments.append("absolute := TRUE")
+        elif to_format["unit_actual"][entry] == "pulse":
             assignments.append(
                 "retain_value := PersistentVars.{0}_retain, calibrate := InputVariables.{0}_calibrate, calibrate_value := InputVariables.{0}_calibrate_value".format(
                     DatabaseNameFormater.format(to_format["database ID"][entry])))
         if to_format["RigOptions"][entry] != "":
             options = to_format["RigOptions"][entry].split()
             assignments.append("rig_options := {}".format(" OR ".join("epirocConf.RigOptions.{}".format(o) for o in options)))
+        if len(assignments) > 0:
+            return " := ({})".format(", ".join(a for a in assignments))
+
+        return ""
+    
+    @staticmethod
+    def format_pwm_outputs_input(to_format):
+        return "\n".join(
+            "{} : {}; // {}".format(
+                DatabaseNameFormater.format(s),
+                "UINT",
+                "Desired output current")
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def format_pwm_outputs_var(to_format):
+        return "\n".join(
+            "{0}_: epirocIOs.{1}(epirocDBD.DatabaseID.{0}, {0}, IO_reader){2};".format(
+                DatabaseNameFormater.format(s),
+                "PWMOutput",
+                IOFormater.format_pwm_output_var_assignment(to_format, i))
+            for i, s in enumerate(to_format["database ID"]))
+    
+    @staticmethod
+    def format_pwm_output_var_assignment(to_format, entry):
+        assignments = []
+        if "IdleThresholdfix" in to_format and to_format["IdleThresholdfix"][entry] != "":
+            assignments.append("extend_threshold_when_idle := TRUE, extended_threshold := TRAMMING_EXTENDED_PWM_THRESHOLD")
+        if "Stuckfix" in to_format and to_format["Stuckfix"][entry] != "":
+            assignments.append("fix_stuck_PWM_error := TRUE")
         if len(assignments) > 0:
             return " := ({})".format(", ".join(a for a in assignments))
 
@@ -526,7 +580,7 @@ class IOFormater:
     @staticmethod
     def format_digital_input_var(to_format):
         return "\n".join(
-            "{0}_: DigitalInputBinaryState(DatabaseID.{0}, {0}.state, IO_reader) := (state := {0});".format(
+            "{0}_: DigitalInputBinaryState(epirocDBD.DatabaseID.{0}, {0}.state, IO_reader) := (state := {0});".format(
                 DatabaseNameFormater.format(s))
             for i, s in enumerate(to_format["database ID"]))
 	
@@ -543,12 +597,30 @@ class IOFormater:
     @staticmethod
     def format_digital_output_var(to_format):
         return "\n".join(
-            "{0}_: epirocIOs.DigitalOutput(DatabaseID.{0}, {0}, IO_reader);".format(
+            "{0}_: epirocIOs.DigitalOutput(epirocDBD.DatabaseID.{0}, {0}, IO_reader);".format(
                 DatabaseNameFormater.format(s))
             for i, s in enumerate(to_format["database ID"]))
     
-def import_to_library(entries, import_textlists):
+def import_to_library(entries, import_type):
     
+    # Import init_database
+    print("Import init_database")
+    init_database = projects.primary.find("init_database", True)
+    if len(init_database) == 0:
+        raise Exception("init_database method not found")
+    init_database = init_database[0]
+
+    
+    init_database.textual_implementation.replace(
+    """reset_general_values();
+
+    {}
+    """.format(InitDatabaseFormater.format_all(entries)))	
+
+    if import_type == IMPORT_LIB_FLEXI_INTERIM:
+        return
+
+
     database_ID_enum_text = projects.primary.find("DatabaseID", True)
     if len(database_ID_enum_text) == 0:
         raise Exception("DatabaseID enum not found")
@@ -564,6 +636,7 @@ def import_to_library(entries, import_textlists):
         database_ID_enum = database_ID_enum_text[0]
         
     # Import DatabaseID enum
+    print("Import Database IDs")
     database_ID_enum.textual_declaration.replace("""{}
     TYPE DatabaseID :
     (
@@ -574,6 +647,7 @@ def import_to_library(entries, import_textlists):
             """.format("{attribute 'qualified_only'}", DatabaseIDFormater.format_all(entries)))
 
     # Import Parameters FB
+    print("Import parameters")
     paramPOU = POU_Finder.find_POU_by_name(projects.primary, "Parameters")
     if paramPOU is None:
         raise Exception("Parameters POU not found")
@@ -591,20 +665,8 @@ def import_to_library(entries, import_textlists):
     END_IF
             """.format(ParametersPOUFormater.format_definition(entries["Parameter"])))
 
-    # Import init_database
-    init_database = projects.primary.find("init_database", True)
-    if len(init_database) == 0:
-        raise Exception("init_database method not found")
-    init_database = init_database[0]
-
     
-    init_database.textual_implementation.replace(
-    """reset_general_values();
-    
-    {}
-    """.format(InitDatabaseFormater.format_all(entries)))	
-    
-    if not import_textlists:
+    if import_type == IMPORT_LIB_NO_TEXTLIST:
         return
     # Look for DatabaseID textlist and delete it and recreate it
     if not database_ID_text is None:
@@ -661,6 +723,7 @@ def import_to_library(entries, import_textlists):
     import_comment("DatabaseGeneralDescriptions", "General")
 
 def import_to_master(entries):
+    # Analog inputs
     analog_input = projects.primary.find("InputsAnalog", True)
     if len(analog_input) == 0:
         raise Exception("InputsAnalog FB not found")
@@ -668,7 +731,7 @@ def import_to_master(entries):
 
     
     analog_input.textual_declaration.replace(
-        """FUNCTION_BLOCK AnalogueInput EXTENDS epirocIOS.IOBaseBlock
+        """FUNCTION_BLOCK InputsAnalog EXTENDS epirocIOS.IOBaseBlock
 VAR_INPUT
 END_VAR
 VAR_OUTPUT
@@ -680,9 +743,32 @@ END_VAR
         """.format(IOFormater.format_analog_input_outputs(entries["AnalogueInput"]),    
                    IOFormater.format_analog_input_var(entries["AnalogueInput"])))
 
+    # PWM Outputs
+    pwm_outputs = projects.primary.find("OutputsPWM", True)
+    if len(pwm_outputs) > 0:
+
+        pwm_outputs = pwm_outputs[0]
 
         
+        pwm_outputs.textual_declaration.replace(
+            """FUNCTION_BLOCK OutputsPWM EXTENDS epirocIOS.IOBaseBlock
+VAR CONSTANT
+	TRAMMING_EXTENDED_PWM_THRESHOLD: INT := 100;
+END_VAR
+VAR_INPUT
+{}
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+{}
+END_VAR
+            """.format(IOFormater.format_pwm_outputs_input(entries["PWMOutput"]),    
+                    IOFormater.format_pwm_outputs_var(entries["PWMOutput"])))
 
+
+        
+    #Digital inputs
     digital_input = projects.primary.find("InputsDigital", True)
     if len(digital_input) == 0:
         raise Exception("InputsDigital FB not found")
@@ -736,15 +822,12 @@ def run():
                 # print(e)
 
             #database_ID_enum = POU_Finder.find_POU_by_name(projects.primary, "DatabaseID")
-            if import_type == 0:
-                import_to_library(entries, True)
-            elif import_type == 1:
-                import_to_library(entries, False)
-            elif import_type == 2:
+            if import_type < IMPORT_PROJECT_INPUTS_OUTPUTS:
+                import_to_library(entries, import_type)
+            elif import_type == IMPORT_PROJECT_INPUTS_OUTPUTS:
                 import_to_master(entries)
-
-            
-            print("--- Script finished. ---")
     except:
         raise
+    finally:
+        print("--- Script finished. ---")
 run()
