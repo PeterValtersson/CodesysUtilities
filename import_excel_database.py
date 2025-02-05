@@ -224,7 +224,8 @@ class CommentFormater:
             to_add.append(("", CommentFormater.clean_comment_string(sheet["Comment"][entry])))
         for c in ["value", "channel", "pin", "location", "num_dec", "max_value", "min_value", "unit", "max_actual", "min_actual", "unit_actual", "KP", "KI", "frequency", "dither_freq", "dither_value", "byte 3", "byte 2", "byte 1", "byte 0"]:
             if c in sheet:
-                to_add.append(("{}:".format(c), sheet[c][entry]))
+                if sheet[c][entry] != "":
+                    to_add.append(("{}:".format(c), sheet[c][entry]))
         
         return ", ".join(["{} {}".format(t, v) for t, v in to_add])
     @staticmethod
