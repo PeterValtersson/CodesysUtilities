@@ -286,6 +286,15 @@ class ParametersPOUFormater:
         if check == "1NA0": return "BOOL"
         return "INT"
     
+class Helpers:
+    @staticmethod
+    def should_exclude(to_format, entry):
+        if "Excluded" in to_format and (to_format["Excluded"][entry] == "X" or to_format["Excluded"][entry] == "x"):
+            return True
+        if "unit_actual" in to_format and to_format["unit_actual"][entry] == "pulse2":
+            return True
+        return False
+    
 global scale_values
 scale_values = ["max_value", "min_value", "value"]
 class InitDatabaseFormater:
@@ -305,7 +314,7 @@ class InitDatabaseFormater:
             "init_{}(database_ID := DatabaseID.{},\t\t{});".format(
                 InitDatabaseFormater.pick_method(type),
                 DatabaseNameFormater.format(s),
-                InitDatabaseFormater.format_init_data(to_format, i)) if not InitDatabaseFormater.should_exclude(to_format, i) else ""
+                InitDatabaseFormater.format_init_data(to_format, i)) if not Helpers.should_exclude(to_format, i) else ""
             for i, s in enumerate(to_format["database ID"]))
     
     @staticmethod
@@ -317,13 +326,6 @@ class InitDatabaseFormater:
         if type == "PWMOutput": return "PWM_output"
         return ""
     
-    @staticmethod
-    def should_exclude(to_format, entry):
-        if "Excluded" in to_format and (to_format["Excluded"][entry] == "X" or to_format["Excluded"][entry] == "x"):
-            return True
-        if "unit_actual" in to_format and to_format["unit_actual"][entry] == "pulse2":
-            return True
-        return False
     
     @staticmethod
     def format_init_data(to_format, entry, white_list = ["value", "channel", "pin", "location", "num_dec", "max_value", "min_value", "unit", "max_actual", "min_actual", "unit_actual", "KP", "KI", "frequency", "dither_freq", "dither_value"]):
@@ -386,7 +388,7 @@ class IOFormater:
                 DatabaseNameFormater.format(s),
                 IOFormater.format_analog_unit_dec(to_format, i),
                 "AnalogueInputValue",
-                "Analog input")
+                "Analog input") 
             for i, s in enumerate(to_format["database ID"]))
     
     @staticmethod
@@ -400,7 +402,7 @@ class IOFormater:
                 DatabaseNameFormater.format(s),
                 IOFormater.select_analog_input_type(to_format["unit_actual"][i]),
                 IOFormater.format_analog_unit_dec(to_format, i),
-                IOFormater.format_analog_input_var_assignment(to_format, i))
+                IOFormater.format_analog_input_var_assignment(to_format, i)) if not Helpers.should_exclude(to_format, i) else ""
             for i, s in enumerate(to_format["database ID"]))
     
     @staticmethod
@@ -441,7 +443,7 @@ class IOFormater:
             "{0}_: epirocIOs.{1}(epirocDBD.DatabaseID.{0}, {0}, IO_reader){2};".format(
                 DatabaseNameFormater.format(s),
                 "PWMOutput",
-                IOFormater.format_pwm_output_var_assignment(to_format, i))
+                IOFormater.format_pwm_output_var_assignment(to_format, i)) if not Helpers.should_exclude(to_format, i) else ""
             for i, s in enumerate(to_format["database ID"]))
     
     @staticmethod
@@ -469,7 +471,7 @@ class IOFormater:
     def format_digital_input_var(to_format):
         return "\n".join(
             "{0}_: DigitalInputBinaryState(epirocDBD.DatabaseID.{0}, {0}.state, IO_reader) := (state := {0});".format(
-                DatabaseNameFormater.format(s))
+                DatabaseNameFormater.format(s)) if not Helpers.should_exclude(to_format, i) else ""
             for i, s in enumerate(to_format["database ID"]))
 	
     
@@ -486,7 +488,7 @@ class IOFormater:
     def format_digital_output_var(to_format):
         return "\n".join(
             "{0}_: epirocIOs.DigitalOutput(epirocDBD.DatabaseID.{0}, {0}, IO_reader);".format(
-                DatabaseNameFormater.format(s))
+                DatabaseNameFormater.format(s)) if not Helpers.should_exclude(to_format, i) else ""
             for i, s in enumerate(to_format["database ID"]))
     
 def import_to_library(entries, import_type):
