@@ -21,7 +21,7 @@ class POU_Finder:
     @staticmethod
     def find_POU_in_tree_by_name(treeobj, POU_name):
         name = treeobj.get_name(False)
-        if name == POU_name and treeobj.has_textual_declaration:
+        if name == POU_name:
             return treeobj
 
         for child in treeobj.get_children(False):
@@ -43,6 +43,7 @@ class POU_Finder:
         POUs = []
         
         if treeobj.has_textual_declaration:
+            print(treeobj.type)
             textual_declaration = treeobj.textual_declaration
             first_line = textual_declaration.get_line(0)
             if first_line.find("(*Test") >= 0 and first_line.find("ABSTRACT") == -1:
